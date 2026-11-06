@@ -2,6 +2,13 @@
 
 All notable changes to this repository are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Optional kas file `kas/hosted-mender.yml` (server URL and tenant token from the environment) and
+  integration guide section 10, "Connecting the device to Hosted Mender".
+
 ## [0.1.0] - 2026-11-06 (draft)
 
 ### Added

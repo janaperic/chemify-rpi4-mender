@@ -22,7 +22,9 @@ the Raspberry Pi 4 Model B and validated it on target hardware on 2026-11-06.
   was installed; an unsigned Artifact and an Artifact signed with a different key were rejected without
   changing the system (AC.1.3).
 
-Open item: the delivery of this repository to Chemify (D.2), see section 7.
+All update tests used the Mender Client in standalone mode, from the device's command line. Connecting
+the device to a Mender Server (for example Hosted Mender) was not part of the validation; the procedure is
+described in the integration guide, section 10.
 
 ## 2. Test environment
 

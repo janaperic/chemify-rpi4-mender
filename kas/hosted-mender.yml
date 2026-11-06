@@ -1,0 +1,17 @@
+# Optional: connect the devices to Hosted Mender (or another Mender Server).
+# Use together with the main configuration, and pass the tenant token from the shell or
+# your CI secrets - never commit a tenant token to the repository:
+#
+#   MENDER_TENANT_TOKEN='<token>' \
+#     kas build kas/chemify-rpi4-mender.yml:kas/hosted-mender.yml
+#
+# EU region: additionally set MENDER_SERVER_URL=https://eu.hosted.mender.io
+# See docs/01-integration-guide.md, section 10.
+header:
+  version: 14
+
+env:
+  # Hosted Mender US instance by default. Overridable from the shell.
+  MENDER_SERVER_URL: "https://hosted.mender.io"
+  # No default: must be set in the environment (kas passes it only if it is set).
+  MENDER_TENANT_TOKEN: null

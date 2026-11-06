@@ -34,8 +34,9 @@ Then boot the Raspberry Pi from the card and log in as `root` on the serial cons
 |---|---|
 | `kas/chemify-rpi4-mender.yml` | Build configuration (based on meta-mender-community `kas/raspberrypi4-64.yml`) |
 | `kas/chemify-rpi4-mender.lock.yml` | Pinned revisions of all layers (applied automatically by kas) |
+| `kas/hosted-mender.yml` | Optional: server settings for Hosted Mender, tenant token from the environment ([guide, section 10](docs/01-integration-guide.md#10-connecting-the-device-to-hosted-mender)) |
 | `meta-chemify-rpi4/` | Integration layer: Artifact verification key (development key), `pseudo` backport |
-| `docs/01-integration-guide.md` | How to build, flash, boot, configure and update |
+| `docs/01-integration-guide.md` | How to build, flash, boot, configure, update, and connect to Hosted Mender |
 | `docs/02-validation-report.md` | Validation on hardware, requirements traceability, results |
 | `docs/03-production-notes.md` | What to change before production use |
 | `docs/appendix/` | Evidence: excerpts of the console logs of the validation |
@@ -51,4 +52,4 @@ Read [docs/03-production-notes.md](docs/03-production-notes.md) before using it 
 
 ## Support
 
-Northern.tech: `<Northern.tech contact>`
+Northern.tech: jana.peric@northern.tech

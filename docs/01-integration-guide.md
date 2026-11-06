@@ -26,7 +26,8 @@ in this repository. Results of the validation on hardware are in
 7. [Configuration explained](#7-configuration-explained)
 8. [Boot flow and U-Boot environment](#8-boot-flow-and-u-boot-environment)
 9. [Creating and installing an update](#9-creating-and-installing-an-update)
-10. [Troubleshooting](#10-troubleshooting)
+10. [Connecting the device to Hosted Mender](#10-connecting-the-device-to-hosted-mender)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -322,7 +323,7 @@ bmaptool: info: copying time: 43.8s, copying speed 6.4 MiB/sec
 ```
 
 Always use the `.sdimg.bmap` produced by the build. It also covers the (empty) U-Boot environment area, so
-that a re-used card starts with a clean environment (see section 10).
+that a re-used card starts with a clean environment (see section 11).
 
 ### 5.2 Alternatives (not used during validation)
 
@@ -407,7 +408,7 @@ mender_boot_part=2
 upgrade_available=0
 ```
 
-The Mender services start about 2 minutes after boot when no network is connected (see section 10).
+The Mender services start about 2 minutes after boot when no network is connected (see section 11).
 Then:
 
 ```bash
@@ -543,8 +544,7 @@ start of the SD card.
 This section describes a **standalone** update from the command line on the device, without a Mender
 Server. All commands in this section were run during the validation (see
 [`02-validation-report.md`](02-validation-report.md), section 4). For managed deployments through a Mender
-Server, see [Mender: deploy an operating system update](https://docs.mender.io/get-started/deploy-an-operating-system-update)
-and the server settings in [`03-production-notes.md`](03-production-notes.md).
+Server, see section 10.
 
 ### 9.1 Build the update Artifact
 
@@ -692,7 +692,142 @@ The client refuses Artifacts that are not signed with the expected key, and does
 
 ---
 
-## 10. Troubleshooting
+## 10. Connecting the device to Hosted Mender
+
+So far, updates are installed from the command line (standalone mode, section 9). This section explains
+how to manage the device from [Hosted Mender](https://hosted.mender.io), Northern.tech's hosted Mender
+Server: the device authenticates with the server, appears in the web UI, and installs deployments that you
+start from the UI.
+
+> **Validation status:** connection to Hosted Mender was **not** part of the validation (the device
+> under test had no network connection). The configuration steps in 10.3 and 10.4 were checked on the build
+> and on the device: the generated `/etc/mender/mender.conf` contains the server and token, and the client
+> uses them (`Authentication error trying server 'https://hosted.mender.io': Host not found` without a
+> network). Authentication, device acceptance and server deployments were not tested.
+
+### 10.1 Prerequisites
+
+| Item | Details |
+|---|---|
+| Hosted Mender account | Choose the region of your organisation: US `https://hosted.mender.io` or EU `https://eu.hosted.mender.io` ([Mender: Hosted Mender regions](https://docs.mender.io/overview/hosted-mender-regions)) |
+| Tenant token | Identifies your organisation to the server (10.2) |
+| Network | Ethernet cable with DHCP. The image configures DHCP on all Ethernet interfaces (`/lib/systemd/network/80-wired.network`). The device needs outbound HTTPS (TCP 443) to the Hosted Mender region, DNS, and NTP (UDP 123) for time synchronisation |
+| Correct time | TLS needs a correct clock. `systemd-timesyncd` is enabled and sets the time once the device has network access. Check with `date` on the device |
+| Server certificate | Hosted Mender uses a certificate from a public certificate authority. The image contains the standard CA certificates (`/etc/ssl/certs`), so no `ServerCertificate` setting is needed |
+| Signing key | Artifacts deployed from the server are verified on the device in the same way as in standalone mode. Upload only Artifacts signed with your private key (section 9.2) |
+
+### 10.2 Get the tenant token
+
+1. Log in to Hosted Mender in your region.
+2. Open the account menu (your email address, top right) and select **My organization**.
+3. In the organization token field, click **Copy to clipboard**.
+
+Treat the tenant token like a password: do not commit it to the repository, and pass it to builds from
+your CI secrets.
+
+### 10.3 Option A (recommended): configure the server at build time
+
+The optional kas file `kas/hosted-mender.yml` sets `MENDER_SERVER_URL` and `MENDER_TENANT_TOKEN`. It takes
+the token from the environment, so that the token never appears in the repository:
+
+```bash
+cd chemify-rpi4-mender
+export KAS_WORK_DIR=$HOME/rpi4-mender-work
+read -rs MENDER_TENANT_TOKEN && export MENDER_TENANT_TOKEN    # paste the token, press Enter
+kas build kas/chemify-rpi4-mender.yml:kas/hosted-mender.yml
+```
+
+For the EU region, also set the server URL:
+
+```bash
+export MENDER_SERVER_URL=https://eu.hosted.mender.io
+kas build kas/chemify-rpi4-mender.yml:kas/hosted-mender.yml
+```
+
+**What you should see:** on a device running the new image, `/etc/mender/mender.conf` contains your
+server and token:
+
+```json
+{
+    "ArtifactVerifyKey": "/etc/mender/artifact-verify-key.pem",
+    "InventoryPollIntervalSeconds": 28800,
+    "RetryPollIntervalSeconds": 300,
+    "ServerURL": "https://hosted.mender.io",
+    "TenantToken": "<your tenant token>",
+    "UpdatePollIntervalSeconds": 1800
+}
+```
+
+Write the resulting `.sdimg` to the device (section 5), and build **every** update Artifact with the same
+command (with a new `MENDER_ARTIFACT_NAME`, section 9.1).
+
+> **Why build time:** `/etc/mender/mender.conf` is part of the root filesystem. A rootfs update replaces it
+> with the file from the new image. If an update is built without the server settings, the device loses its
+> connection to the server after that update.
+
+### 10.4 Option B: configure a running device (for a quick test)
+
+To connect a device that runs the image without server settings, edit `/etc/mender/mender.conf` on the
+device. Replace `<your tenant token>` (and the URL, for the EU region):
+
+```bash
+cp /etc/mender/mender.conf /etc/mender/mender.conf.orig
+sed -i -e 's|"ServerURL": ".*"|"ServerURL": "https://hosted.mender.io"|' \
+       -e 's|"TenantToken": ".*"|"TenantToken": "<your tenant token>"|' /etc/mender/mender.conf
+cat /etc/mender/mender.conf
+systemctl restart mender-authd mender-updated
+```
+
+Keep the other entries, in particular `ArtifactVerifyKey`. You can also edit the file with `vi`. The
+client reads its configuration only at start-up, hence the restart.
+
+> **Limitation:** the change is lost with the next rootfs update unless that update was built with the
+> server settings (Option A). `/var/lib/mender/mender.conf` on the data partition is only a fallback:
+> settings in `/etc/mender/mender.conf` take precedence over it.
+
+### 10.5 Accept the device
+
+1. Connect the Ethernet cable and power on (or restart the services as in 10.4). With a network, the
+   Mender services start right after boot, without the 2-minute wait described in section 11.
+2. On the device, check the time and follow the client log:
+
+   ```bash
+   date
+   journalctl -u mender-authd -u mender-updated -f
+   ```
+
+3. In the Hosted Mender UI, open **Devices**. The device appears as **Pending**, identified by the MAC
+   address of `eth0` (`mac=...`, the same value that `/usr/share/mender/identity/mender-device-identity`
+   prints on the device).
+4. Check the identity and click **Accept**. The device moves to the accepted devices and starts reporting
+   its inventory (device type `raspberrypi4-64`, current Artifact name, network and OS information).
+
+### 10.6 Deploy an update from Hosted Mender
+
+1. Build the update Artifact with the server settings and a new name (sections 9.1 and 10.3), and sign it
+   (section 9.2).
+2. In the UI, open **Releases**, upload the signed `.mender` file.
+3. Create a deployment of this release to the device (or a group of devices).
+4. The device checks for deployments every 30 minutes by default (`UpdatePollIntervalSeconds: 1800`). To
+   check immediately, run on the device:
+
+   ```bash
+   mender-update check-update
+   ```
+
+5. The device downloads and installs the Artifact, reboots into the new root filesystem, commits the
+   update and reports the result. Follow the progress in the UI and in the client log. Afterwards,
+   `mender-update show-artifact` shows the new name.
+
+In managed mode, do **not** stop `mender-updated`; it performs the deployment. If the new version fails to
+boot, U-Boot rolls back automatically as described in section 8.2, and the deployment is reported as
+failed.
+
+For more information see [Mender: deploy an operating system update](https://docs.mender.io/get-started/deploy-an-operating-system-update).
+
+---
+
+## 11. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -706,4 +841,7 @@ The client refuses Artifacts that are not signed with the expected key, and does
 | `mender-update install` reports `Signature verification Error` and `System not modified` | Artifact not signed, or signed with a key that does not match `/etc/mender/artifact-verify-key.pem` | Sign the Artifact with the matching private key (section 9.2) |
 | `mender-update commit` reports `Upgrade failed and was reverted: refusing to commit!` | The update did not boot (or the device was rebooted before commit), and U-Boot rolled back automatically | Expected protection. Investigate why the new version failed to boot (serial console) |
 | The bootloader reports `failed to open device: 'sdcard'` (not observed during this validation) | The SD card is not accessible: not inserted, not seated properly, or not connected to the Raspberry Pi | Check the card and its connection, then power-cycle |
+| The client log shows `Authentication error trying server '...': Host not found` | No network connection or no DNS | Connect the Ethernet cable, check `ip addr`, `ip route` and `/etc/resolv.conf` (section 10.1) |
+| The device does not appear as pending in Hosted Mender | Wrong region (US/EU), wrong or missing tenant token, no network, or wrong time (TLS) | Check `ServerURL` and `TenantToken` in `/etc/mender/mender.conf`, `date`, and the client log (`journalctl -u mender-authd`) |
+| After an update, the device no longer connects to the server | The update was built without the server settings, so its `/etc/mender/mender.conf` contains the default values | Build every image and Artifact with `kas/hosted-mender.yml` (section 10.3) |
 | `Undervoltage detected!` on the console (not observed during this validation) | Insufficient power supply | Use a 5.1 V / 3 A supply and short, adequate cables |

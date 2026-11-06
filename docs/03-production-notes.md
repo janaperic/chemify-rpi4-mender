@@ -55,17 +55,11 @@ network) log in as `root` without a password.
 
 With network access, the client would try to connect to that address. Choose one mode:
 
-- **Managed mode (Mender Server, e.g. hosted Mender):** set the server in `kas/chemify-rpi4-mender.yml`
-  (`local_conf_header`, section `chemify`):
-
-  ```text
-  MENDER_SERVER_URL = "https://<your Mender Server>"
-  MENDER_TENANT_TOKEN = "<your tenant token>"
-  ```
-
-  Do not commit a real tenant token to a shared repository; pass it from your CI secrets instead, for
-  example through the kas `env` section like `MENDER_ARTIFACT_NAME`. See
-  [Mender: build for production](https://docs.mender.io/operating-system-updates-yocto-project/build-for-production).
+- **Managed mode (Hosted Mender or another Mender Server):** build every image and Artifact with the
+  optional kas file `kas/hosted-mender.yml`, which sets `MENDER_SERVER_URL` and takes
+  `MENDER_TENANT_TOKEN` from the environment (pass it from your CI secrets; never commit it). The
+  complete procedure is in the [integration guide, section 10](01-integration-guide.md#10-connecting-the-device-to-hosted-mender).
+  See also [Mender: build for production](https://docs.mender.io/operating-system-updates-yocto-project/build-for-production).
 
 - **Standalone mode (updates only through `mender-update install`):** the `mender-updated` daemon must
   not run ([Mender: standalone deployment](https://docs.mender.io/artifact-creation/standalone-deployment)).
