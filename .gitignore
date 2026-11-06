@@ -1,0 +1,12 @@
+# kas / BitBake work areas (if KAS_WORK_DIR is not set, kas uses the current directory)
+/build/
+/bitbake/
+/openembedded-core/
+/meta-yocto/
+/meta-openembedded/
+/meta-raspberrypi/
+/meta-mender/
+/meta-mender-community/
+# Never commit private signing keys
+*.key
+*private*.pem

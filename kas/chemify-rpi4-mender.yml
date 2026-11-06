@@ -1,0 +1,64 @@
+# Raspberry Pi 4 Model B (64-bit) - Yocto Project Scarthgap - Mender OTA (U-Boot, A/B rootfs)
+#
+# Build:   kas build kas/chemify-rpi4-mender.yml
+# Update:  MENDER_ARTIFACT_NAME=chemify-rpi4-0.1.1 kas build kas/chemify-rpi4-mender.yml
+#
+# Base configuration: meta-mender-community kas/raspberrypi4-64.yml (scarthgap), which provides
+#   MACHINE = "raspberrypi4-64", DISTRO = "poky", INIT_MANAGER = "systemd",
+#   INHERIT += "mender-full", RPI_USE_U_BOOT = "1", ENABLE_UART = "1",
+#   MENDER_BOOT_PART_SIZE_MB = "100", target core-image-minimal.
+# This file only adds what differs from that base. See docs/01-integration-guide.md.
+header:
+  version: 14
+  includes:
+    - repo: meta-mender-community
+      file: kas/raspberrypi4-64.yml
+
+repos:
+  # The repository containing this file; provides meta-chemify-rpi4.
+  chemify-rpi4-mender:
+    layers:
+      meta-chemify-rpi4:
+
+  meta-mender-community:
+    url: https://github.com/mendersoftware/meta-mender-community.git
+    # branch: scarthgap
+    commit: 57f10880a166ccca9b49fa451983f44e72a39561
+
+  # Mender Client 6.1 LTS (mender-update / mender-auth 5.2.0).
+  # Overrides the scarthgap-v2025.11 pin of the base configuration (Mender Client 5.0, EOL).
+  meta-mender:
+    # tag: scarthgap-v2026.10.02
+    commit: 0c9dbc2a1afab7ba63f6515cf58435b6747b78db
+
+  # Same repositories and commits as the base configuration, fetched over https
+  # instead of git:// (TCP port 9418 is blocked on many networks).
+  openembedded-core:
+    url: https://git.openembedded.org/openembedded-core
+  bitbake:
+    url: https://git.openembedded.org/bitbake
+  meta-yocto:
+    url: https://git.yoctoproject.org/meta-yocto
+  meta-openembedded:
+    url: https://git.openembedded.org/meta-openembedded
+
+env:
+  # Name of the software version; must be different for every update Artifact.
+  # Override from the shell: MENDER_ARTIFACT_NAME=<name> kas build ...
+  MENDER_ARTIFACT_NAME: "chemify-rpi4-0.1.0"
+
+local_conf_header:
+  # Replaces the base configuration's fixed MENDER_ARTIFACT_NAME = "gha_autobuild",
+  # so the value from the env section above (or the shell) is used.
+  mender-artifact: |
+    # MENDER_ARTIFACT_NAME is taken from the environment (kas env section).
+
+  chemify: |
+    # Put the same root filesystem into both rootfs A and rootfs B of the SD card image,
+    # so that the inactive partition is bootable from the start (needed for the integration
+    # checklist). Optional for production - see docs/03-production-notes.md.
+    MENDER_FEATURES_ENABLE:append = " mender-prepopulate-inactive-partition"
+
+    # DEVELOPMENT ONLY: passwordless root login on the serial console.
+    # Remove before production - see docs/03-production-notes.md.
+    EXTRA_IMAGE_FEATURES += "allow-empty-password empty-root-password allow-root-login"

@@ -1,0 +1,18 @@
+header:
+    version: 14
+overrides:
+    repos:
+        bitbake:
+            commit: 8dcf084522b9c66a6639b5f117f554fde9b6b45a
+        meta-mender:
+            commit: 0c9dbc2a1afab7ba63f6515cf58435b6747b78db
+        meta-mender-community:
+            commit: 57f10880a166ccca9b49fa451983f44e72a39561
+        meta-openembedded:
+            commit: ec0469748be4159fb83fb0fa0148d786484c88cf
+        meta-raspberrypi:
+            commit: 2c646d29912dcc873469a57b1c207e1549c5094d
+        meta-yocto:
+            commit: 9bb6e6e8b016a0c9dfe290369a6ed91ef4020535
+        openembedded-core:
+            commit: 6988157ad983978ffd6b12bcefedd4deaffdbbd1
