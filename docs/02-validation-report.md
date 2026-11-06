@@ -187,9 +187,9 @@ meta-mender-community scarthgap base configuration (`kas/include/mender-base.yml
 ### 7.2 D.2: delivery of the repository
 
 This repository is delivered to Chemify through a GitHub repository shared with Chemify:
-`<repository URL>`.
+https://github.com/janaperic/chemify-rpi4-mender
 
-> TODO (pending validation): record the repository URL above and confirm that Chemify has access.
+> TODO (pending validation): confirm that Chemify has access to the repository.
 
 ### 7.3 Signing keys
 
