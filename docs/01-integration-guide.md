@@ -711,7 +711,7 @@ start from the UI.
 |---|---|
 | Hosted Mender account | Choose the region of your organisation: US `https://hosted.mender.io` or EU `https://eu.hosted.mender.io` ([Mender: Hosted Mender regions](https://docs.mender.io/overview/hosted-mender-regions)) |
 | Tenant token | Identifies your organisation to the server (10.2) |
-| Network | Ethernet cable with DHCP. The image configures DHCP on all Ethernet interfaces (`/lib/systemd/network/80-wired.network`). The device needs outbound HTTPS (TCP 443) to the Hosted Mender region, DNS, and NTP (UDP 123) for time synchronisation |
+| Network | Ethernet (WiFi will work too, but needs manual configuration on the device) |
 | Correct time | TLS needs a correct clock. `systemd-timesyncd` is enabled and sets the time once the device has network access. Check with `date` on the device |
 | Server certificate | Hosted Mender uses a certificate from a public certificate authority. The image contains the standard CA certificates (`/etc/ssl/certs`), so no `ServerCertificate` setting is needed |
 | Signing key | Artifacts deployed from the server are verified on the device in the same way as in standalone mode. Upload only Artifacts signed with your private key (section 9.2) |
