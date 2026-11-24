@@ -119,7 +119,7 @@ MENDER_EXTRA_PARTS_SIZES_MB[secrets] = "1"
 MENDER_EXTRA_PARTS[secrets] = "--fstype=none"
 MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[secrets] = "/mnt/secrets"
 IMAGE_CLASSES += "mender-raw-extra-parts"
-MENDER_RAW_EXTRA_PARTS = "secrets"
+RAW_EXTRA_PARTS = "secrets"
 ```
 
 - `MENDER_EXTRA_PARTS` is the meta-mender mechanism for additional partitions after the data partition
@@ -130,7 +130,7 @@ MENDER_RAW_EXTRA_PARTS = "secrets"
 - meta-mender always adds an `/etc/fstab` entry (mounted at boot) and a mount directory for each extra
   partition. Mounting a raw or encrypted partition at boot would fail. The small class
   `meta-chemify-rpi4/classes/mender-raw-extra-parts.bbclass` removes the entry and the directory again for
-  the partitions listed in `MENDER_RAW_EXTRA_PARTS`; the build fails if the entry is not found. The mount
+  the partitions listed in `RAW_EXTRA_PARTS`; the build fails if the entry is not found. The mount
   location is set explicitly, because meta-mender writes an fstab line without a mount point otherwise.
 
 > **Size and encryption headers.** 1 MiB is enough for small secrets, but not for an encryption container

@@ -77,7 +77,7 @@ local_conf_header:
     # fstab line without a mount point.)
     MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[secrets] = "/mnt/secrets"
     IMAGE_CLASSES += "mender-raw-extra-parts"
-    MENDER_RAW_EXTRA_PARTS = "secrets"
+    RAW_EXTRA_PARTS = "secrets"
 
     # The data partition can no longer grow to the end of the storage, because the
     # secrets partition follows it. (meta-mender disables this automatically when

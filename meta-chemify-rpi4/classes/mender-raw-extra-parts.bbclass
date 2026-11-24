@@ -8,23 +8,23 @@
 #
 # Usage (image recipes, e.g. through IMAGE_CLASSES):
 #   IMAGE_CLASSES += "mender-raw-extra-parts"
-#   MENDER_RAW_EXTRA_PARTS = "secrets"
+#   RAW_EXTRA_PARTS = "secrets"
 #
-# Each name in MENDER_RAW_EXTRA_PARTS must also be listed in MENDER_EXTRA_PARTS and
+# Each name in RAW_EXTRA_PARTS must also be listed in MENDER_EXTRA_PARTS and
 # have a MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[<name>] entry (meta-mender identifies the
 # fstab line by it).
 
-MENDER_RAW_EXTRA_PARTS ??= ""
+RAW_EXTRA_PARTS ??= ""
 
 def mender_raw_extra_parts_mounts(d):
     extra = (d.getVar('MENDER_EXTRA_PARTS') or "").split()
     mounts = []
-    for part in (d.getVar('MENDER_RAW_EXTRA_PARTS') or "").split():
+    for part in (d.getVar('RAW_EXTRA_PARTS') or "").split():
         if part not in extra:
-            bb.fatal("MENDER_RAW_EXTRA_PARTS: '%s' is not listed in MENDER_EXTRA_PARTS" % part)
+            bb.fatal("RAW_EXTRA_PARTS: '%s' is not listed in MENDER_EXTRA_PARTS" % part)
         mount = (d.getVarFlag('MENDER_EXTRA_PARTS_MOUNT_LOCATIONS', part) or "").strip()
         if not mount.startswith('/') or mount == '/':
-            bb.fatal("MENDER_RAW_EXTRA_PARTS: set MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[%s] to an absolute path" % part)
+            bb.fatal("RAW_EXTRA_PARTS: set MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[%s] to an absolute path" % part)
         mounts.append(mount)
     return ' '.join(mounts)
 
@@ -44,7 +44,7 @@ mender_raw_extra_parts_fstab_cleanup() {
     done
     # meta-mender writes the extra partition entries after the data partition entry;
     # fail if an entry for a raw partition device is still present.
-    for dev in ${@' '.join('%s%d' % (d.getVar('MENDER_STORAGE_DEVICE_BASE'), mender_get_extra_parts_offset_by_id(d, p)) for p in (d.getVar('MENDER_RAW_EXTRA_PARTS') or '').split())}; do
+    for dev in ${@' '.join('%s%d' % (d.getVar('MENDER_STORAGE_DEVICE_BASE'), mender_get_extra_parts_offset_by_id(d, p)) for p in (d.getVar('RAW_EXTRA_PARTS') or '').split())}; do
         if awk -v p="$dev" '$1 == p { found = 1 } END { exit !found }' $fstab; then
             bbfatal "/etc/fstab still contains an entry for raw extra partition $dev"
         fi
