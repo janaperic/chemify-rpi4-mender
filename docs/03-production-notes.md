@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Title | Production Notes: Mender Integration on Raspberry Pi 4 Model B |
-| Version | 0.1 (draft) |
-| Date | 2026-11-06 |
+| Version | 0.2 (draft) |
+| Date | 2026-11-24 |
 | Author | Northern.tech |
 | Customer | Chemify.io |
 | SoW reference | Workstream A: Board Integration |
@@ -25,13 +25,14 @@ Mender's general guidance for production builds:
 | 2 | Server or standalone mode | Configure `MENDER_SERVER_URL` / `MENDER_TENANT_TOKEN`, or configure standalone mode | Required |
 | 3 | Signing keys | Use your own key pair instead of the development key, with proper key management | Required (before your first build) |
 | 4 | Time synchronisation | Ensure a correct clock (network time or RTC) | Required for server mode |
-| 5 | Storage sizing | Set the partition sizes for the target storage (SoW: 7 GB) | Required |
+| 5 | Storage sizing | Check the partition sizes against your product image and storage (SoW: 7 GB) | Required |
 | 6 | SD card wear | Choose suitable storage, minimise writes | Recommended |
 | 7 | Boot partition content | Plan how firmware, `config.txt` and device tree changes are delivered | Required if needed |
 | 8 | Prepopulated rootfs B | `mender-prepopulate-inactive-partition` is optional | Optional |
 | 9 | pseudo backport | Remove after moving to yocto-5.0.21 or later | Recommended |
 | 10 | Distribution and versions | Own distribution configuration, Artifact naming, LTS tracking | Recommended |
 | 11 | Serial console and offline start-up | Restrict console access; adjust network wait for offline devices | Recommended |
+| 12 | Secrets partition and layout change (version 0.2) | Address `/dev/mmcblk0p6`; data is now `/dev/mmcblk0p5`; re-write devices that have the 0.1 layout | Required |
 
 ## 1. Remove the development login
 
@@ -102,39 +103,35 @@ to delay the Mender client until the time is synchronised.
 
 ## 5. Storage sizing (SoW: 7 GB available)
 
-**Why:** the delivered image uses the meta-mender default `MENDER_STORAGE_TOTAL_SIZE_MB = "1024"`, which
-gives:
+**Why:** partition sizes cannot be changed by an update, and since version 0.2 the data partition no longer
+grows to the end of the card (integration guide, section 1.1). The delivered configuration sets:
 
-| Partition | Size |
-|---|---|
-| Reserved (partition table, U-Boot environment) | 24 MiB |
-| Boot (`MENDER_BOOT_PART_SIZE_MB`) | 100 MiB |
-| Rootfs A and rootfs B | 376 MiB each |
-| Data (`MENDER_DATA_PART_SIZE_MB` default) | 128 MiB, grown to the end of the card on first boot |
+| Partition | Size | Setting |
+|---|---|---|
+| Reserved (partition table, U-Boot environment) | 24 MiB | meta-mender default |
+| Boot | 100 MiB | `MENDER_BOOT_PART_SIZE_MB` (base configuration) |
+| Rootfs A and rootfs B | 2048 MiB each | calculated from `MENDER_STORAGE_TOTAL_SIZE_MB = "6288"` |
+| Data | 2048 MiB, fixed | `MENDER_DATA_PART_SIZE_MB = "2048"` |
+| Secrets | 1 MiB (in an 8 MiB aligned slot) | `MENDER_EXTRA_PARTS_SIZES_MB[secrets] = "1"` |
+| **Image total** | **6296 MiB (6.6 GB)** | fits the 7 GB of the target |
 
-`core-image-minimal` fits easily. Your product image (application, runtime libraries) must fit into **one**
-rootfs partition, with headroom for future versions, because the partition sizes cannot be changed by an
-update.
+`core-image-minimal` uses only a small part of the 2048 MiB rootfs partitions. Your product image must fit
+into **one** rootfs partition, with headroom for future versions.
 
-**How:** decide the rootfs size from your expected image size plus headroom, and set the total so that it
-does not exceed the **smallest** storage you will ship (7 GB according to the SoW), for example:
-
-```text
-MENDER_STORAGE_TOTAL_SIZE_MB = "<total MiB, at most the smallest card>"
-MENDER_DATA_PART_SIZE_MB = "<initial data size in MiB>"
-```
-
-The two rootfs partitions get the remaining space in equal parts. The data partition still grows to the
-end of the card on first boot (`mender-growfs-data`). See
-[Mender: partition configuration](https://docs.mender.io/operating-system-updates-yocto-project/board-integration/partition-configuration).
+**How:** decide the rootfs size from your expected image size plus headroom, and the data size from your
+application's needs. Then set `MENDER_DATA_PART_SIZE_MB` and `MENDER_STORAGE_TOTAL_SIZE_MB`; meta-mender
+gives each rootfs (total − 104 − data − 8 − 32) / 2 MiB, rounded down to 8 MiB. The image is 8 MiB larger
+than `MENDER_STORAGE_TOTAL_SIZE_MB` because of the extended partition, and must not exceed the
+**smallest** storage you will ship. Larger rootfs partitions also mean that each update writes more data.
+See [Mender: partition configuration](https://docs.mender.io/operating-system-updates-yocto-project/board-integration/partition-configuration).
 Verify the result with `fdisk -l` on the `.sdimg` and on a device with the smallest supported card.
 
 ## 6. SD card wear and reliability (recommended)
 
 - Use industrial-grade SD cards (pSLC or with wear levelling and power-loss protection) for products.
 - Each rootfs update writes the inactive rootfs partition. `mender-flash` skips blocks that are unchanged
-  (during validation, 274.7 MB of 394.3 MB were written for an update), but plan for one partition write
-  per update.
+  (during validation, 1.82 GB of 2.15 GB were written for a first update, 12.6 MB for a repeated
+  update of the same version), but plan for one partition write per update.
 - Keep frequent writes off the root filesystem. In this image `/var/log` is already in RAM
   (`/var/log -> volatile/log`). Put persistent application data on `/data`, which is kept across updates.
 - Consider a read-only root filesystem (`IMAGE_FEATURES += "read-only-rootfs"`); Mender supports it.
@@ -193,3 +190,31 @@ Scarthgap point releases also contain security fixes), delete `recipes-devtools/
   connection, they start only after `systemd-networkd-wait-online.service` has timed out (about 2 minutes,
   observed during validation). If your devices often start without network, adjust the wait-online
   configuration for your network setup.
+
+## 12. Secrets partition and layout change (version 0.2)
+
+**Why:** version 0.2 adds the raw 1 MiB partition `secrets` for your encrypted secrets storage (integration
+guide, section 1.2). Because an MBR partition table holds only four primary partitions, the data and secrets
+partitions are logical partitions inside an extended partition, which changes the partition numbers.
+
+**How:**
+
+- **Address the secrets partition as `/dev/mmcblk0p6`** (not p5), or, after your software has created its
+  encrypted container, by the container's UUID (for example `/dev/disk/by-uuid/<LUKS UUID>`). The partition
+  has no label: MBR has no partition names, and there is no filesystem on it.
+- **The data partition is now `/dev/mmcblk0p5`** (was p4) and has a fixed size of 2048 MiB. It is still
+  mounted at `/data`; software that uses `/data` needs no change. Anything that refers to
+  `/dev/mmcblk0p4` must be changed: p4 is now the extended partition and cannot be used directly.
+- **Rootfs A/B remain `/dev/mmcblk0p2` and `/dev/mmcblk0p3`.**
+- **Re-write devices that have the version 0.1 layout** with the version 0.2 `.sdimg`. A Mender update only
+  replaces a root filesystem; it cannot change the partition table or create partitions. Data on `/data`
+  of those devices is lost when the card is re-written; back it up first if needed. Do not deploy version
+  0.2 Artifacts to devices with the 0.1 layout: the 0.2 root filesystem expects the data partition at p5.
+- **Initialise the partition in your provisioning.** Its content after writing the `.sdimg` is undefined on
+  re-used cards (only blocks that contain data are written). Rootfs updates, rollbacks and power cycles do
+  not change it (validated, validation report section 8.4).
+- **Size.** The default LUKS2 header (16 MiB) and LUKS1 (2 MiB) do not fit into 1 MiB. A LUKS2 container
+  with a reduced header fits (integration guide, section 1.2). If you need more space, up to 8 MiB uses no
+  additional space on the card (not validated).
+- **Backups and wear.** The partition is part of the SD card; it is not protected against card failure or
+  card cloning by itself. The security of the stored secrets depends on your encryption and key storage.

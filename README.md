@@ -10,11 +10,12 @@ delivered by Northern.tech to Chemify.io under **Workstream A: Board Integration
 | Mender Client | 6.1 LTS (`mender-update` / `mender-auth` 5.2.0), meta-mender `scarthgap-v2026.10.02` |
 | Bootloader / kernel | U-Boot 2024.01 / Linux 6.6.63 |
 | Update scheme | A/B root filesystem with automatic rollback, persistent data partition, signed Artifacts |
+| Partition layout (MBR) | p1 boot 100 MiB, p2/p3 rootfs A/B 2048 MiB each, p4 extended, p5 data 2048 MiB (`/data`), p6 `secrets` 1 MiB raw; image 6.6 GB ([guide, section 1.1](docs/01-integration-guide.md#11-partition-layout)) |
 
 ## Quick start
 
-Requirements: a Linux build host with the Yocto Project prerequisites, about 100 GB free disk space, and kas
-4.0 (see the [integration guide, section 3](docs/01-integration-guide.md#3-build-host-requirements)).
+Requirements: a Linux build host with the Yocto Project prerequisites, about 100 GB free disk space, an SD
+card of at least 8 GB, and kas 4.0 (see the [integration guide, section 3](docs/01-integration-guide.md#3-build-host-requirements)).
 
 ```bash
 git clone <repository URL> chemify-rpi4-mender && cd chemify-rpi4-mender
@@ -35,7 +36,7 @@ Then boot the Raspberry Pi from the card and log in as `root` on the serial cons
 | `kas/chemify-rpi4-mender.yml` | Build configuration (based on meta-mender-community `kas/raspberrypi4-64.yml`) |
 | `kas/chemify-rpi4-mender.lock.yml` | Pinned revisions of all layers (applied automatically by kas) |
 | `kas/hosted-mender.yml` | Optional: server settings for Hosted Mender, tenant token from the environment ([guide, section 10](docs/01-integration-guide.md#10-connecting-the-device-to-hosted-mender)) |
-| `meta-chemify-rpi4/` | Integration layer: Artifact verification key (development key), `pseudo` backport |
+| `meta-chemify-rpi4/` | Integration layer: Artifact verification key (development key), class for the raw secrets partition, `pseudo` backport |
 | `docs/01-integration-guide.md` | How to build, flash, boot, configure, update, and connect to Hosted Mender |
 | `docs/02-validation-report.md` | Validation on hardware, requirements traceability, results |
 | `docs/03-production-notes.md` | What to change before production use |

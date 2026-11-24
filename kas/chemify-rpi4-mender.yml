@@ -1,7 +1,7 @@
 # Raspberry Pi 4 Model B (64-bit) - Yocto Project Scarthgap - Mender OTA (U-Boot, A/B rootfs)
 #
 # Build:   kas build kas/chemify-rpi4-mender.yml
-# Update:  MENDER_ARTIFACT_NAME=chemify-rpi4-0.1.1 kas build kas/chemify-rpi4-mender.yml
+# Update:  MENDER_ARTIFACT_NAME=chemify-rpi4-0.2.1 kas build kas/chemify-rpi4-mender.yml
 #
 # Base configuration: meta-mender-community kas/raspberrypi4-64.yml (scarthgap), which provides
 #   MACHINE = "raspberrypi4-64", DISTRO = "poky", INIT_MANAGER = "systemd",
@@ -45,7 +45,7 @@ repos:
 env:
   # Name of the software version; must be different for every update Artifact.
   # Override from the shell: MENDER_ARTIFACT_NAME=<name> kas build ...
-  MENDER_ARTIFACT_NAME: "chemify-rpi4-0.1.0"
+  MENDER_ARTIFACT_NAME: "chemify-rpi4-0.2.0"
 
 local_conf_header:
   # Replaces the base configuration's fixed MENDER_ARTIFACT_NAME = "gha_autobuild",
@@ -58,6 +58,31 @@ local_conf_header:
     # so that the inactive partition is bootable from the start (needed for the integration
     # checklist). Optional for production - see docs/03-production-notes.md.
     MENDER_FEATURES_ENABLE:append = " mender-prepopulate-inactive-partition"
+
+    # Partition layout (MBR) - see docs/01-integration-guide.md, sections 1.1 and 1.2.
+    #   p1 boot 100 MiB, p2/p3 rootfs A/B 2048 MiB each (calculated by meta-mender),
+    #   p4 extended, p5 data 2048 MiB (fixed size), p6 secrets 1 MiB (raw).
+    # The image (about 6.6 GB) fits into the 7 GB storage of the target.
+    MENDER_STORAGE_TOTAL_SIZE_MB = "6288"
+    MENDER_DATA_PART_SIZE_MB = "2048"
+
+    # Raw 1 MiB partition for the application's encrypted secrets storage:
+    # no filesystem (--fstype=none), not mounted, not touched by Mender updates.
+    MENDER_EXTRA_PARTS = "secrets"
+    MENDER_EXTRA_PARTS_SIZES_MB[secrets] = "1"
+    MENDER_EXTRA_PARTS[secrets] = "--fstype=none"
+    # meta-mender adds an fstab entry and a mount directory for every extra
+    # partition; meta-chemify-rpi4/classes/mender-raw-extra-parts.bbclass removes them.
+    # (The mount location must be set explicitly: without it, meta-mender writes an
+    # fstab line without a mount point.)
+    MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[secrets] = "/mnt/secrets"
+    IMAGE_CLASSES += "mender-raw-extra-parts"
+    MENDER_RAW_EXTRA_PARTS = "secrets"
+
+    # The data partition can no longer grow to the end of the storage, because the
+    # secrets partition follows it. (meta-mender disables this automatically when
+    # MENDER_EXTRA_PARTS is set; stated here explicitly.)
+    MENDER_FEATURES_DISABLE:append = " mender-growfs-data"
 
     # DEVELOPMENT ONLY: passwordless root login on the serial console.
     # Remove before production - see docs/03-production-notes.md.

@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Title | Mender Integration Guide: Raspberry Pi 4 Model B, Yocto Project Scarthgap |
-| Version | 0.1 (draft) |
-| Date | 2026-11-06 |
+| Version | 0.2 (draft) |
+| Date | 2026-11-24 |
 | Author | Northern.tech |
 | Customer | Chemify.io |
 | SoW reference | Workstream A: Board Integration (deliverables D.1, D.2) |
@@ -44,35 +44,103 @@ The integration provides:
 - The standard Mender partition layout: a boot partition, two root filesystem partitions (A and B) and a
   persistent data partition (SoW R.1.2). See
   [Mender: partition layout](https://docs.mender.io/operating-system-updates-yocto-project/overview#partition-layout).
+- An additional raw 1 MiB partition `secrets` (`/dev/mmcblk0p6`) for the application's encrypted secrets
+  storage (change request, version 0.2; section 1.2).
 - Signature verification of Mender Artifacts. The image contains a public verification key and only
   installs Artifacts signed with the matching private key (SoW R.1.4).
 
 ### 1.1 Partition layout
 
-The SD card image (`.sdimg`) has the following layout. Sizes are those of the image as built. The data
-partition is grown to the end of the SD card automatically on first boot.
+The SD card image (`.sdimg`) uses an MBR (DOS) partition table. MBR allows four primary partitions; because
+there are five partitions, the fourth entry is an **extended partition** (p4) that contains the data
+partition (p5) and the secrets partition (p6) as logical partitions. All sizes are fixed at build time.
 
 ```mermaid
 flowchart LR
     R["Reserved<br/>0-24 MiB<br/>partition table,<br/>U-Boot environment<br/>at 8 MiB and 16 MiB"]
     P1["p1: boot<br/>FAT32, 100 MiB<br/>/uboot<br/>RPi firmware,<br/>config.txt, U-Boot"]
-    P2["p2: rootfs A<br/>ext4, 376 MiB<br/>/ (when active)<br/>OS incl. /boot/Image"]
-    P3["p3: rootfs B<br/>ext4, 376 MiB<br/>/ (when active)<br/>OS incl. /boot/Image"]
-    P4["p4: data<br/>ext4, 128 MiB in image,<br/>grows to fill the card<br/>/data (persistent)"]
+    P2["p2: rootfs A<br/>ext4, 2048 MiB<br/>/ (when active)<br/>OS incl. /boot/Image"]
+    P3["p3: rootfs B<br/>ext4, 2048 MiB<br/>/ (when active)<br/>OS incl. /boot/Image"]
+    subgraph P4["p4: extended partition"]
+        P5["p5: data<br/>ext4, 2048 MiB<br/>/data (persistent)"]
+        P6["p6: secrets<br/>raw, 1 MiB<br/>not mounted"]
+    end
     R --- P1 --- P2 --- P3 --- P4
 ```
 
-| Partition | Device | File system | Size in image | Content |
-|---|---|---|---|---|
-| (reserved) | `/dev/mmcblk0`, 0 to 24 MiB | none | 24 MiB | Partition table; two redundant copies of the U-Boot environment at offsets 8 MiB and 16 MiB (16 KiB each) |
-| p1 boot | `/dev/mmcblk0p1`, mounted at `/uboot` | FAT32 | 100 MiB | Raspberry Pi firmware, `config.txt`, U-Boot (`kernel8.img`), U-Boot script `boot.scr`, overlays. Not changed by rootfs updates |
-| p2 rootfs A | `/dev/mmcblk0p2` | ext4 | 376 MiB | Complete root filesystem, including the kernel (`/boot/Image`) |
-| p3 rootfs B | `/dev/mmcblk0p3` | ext4 | 376 MiB | Second root filesystem. An update is always written to the inactive one of A/B |
-| p4 data | `/dev/mmcblk0p4` | ext4 | 128 MiB, then whole remaining card | Persistent data, mounted at `/data`. Holds the Mender state (`/data/mender`, reachable as `/var/lib/mender`) and the U-Boot tool configuration. Kept across updates |
+| Partition | Device | File system | Start (MiB) | Size | Content |
+|---|---|---|---|---|---|
+| (reserved) | `/dev/mmcblk0` | none | 0 | 24 MiB | Partition table; two redundant copies of the U-Boot environment at offsets 8 MiB and 16 MiB (16 KiB each) |
+| p1 boot | `/dev/mmcblk0p1`, mounted at `/uboot` | FAT32 | 24 | 100 MiB | Raspberry Pi firmware, `config.txt`, U-Boot (`kernel8.img`), U-Boot script `boot.scr`, overlays. Not changed by rootfs updates |
+| p2 rootfs A | `/dev/mmcblk0p2` | ext4 | 128 | 2048 MiB | Complete root filesystem, including the kernel (`/boot/Image`) |
+| p3 rootfs B | `/dev/mmcblk0p3` | ext4 | 2176 | 2048 MiB | Second root filesystem. An update is always written to the inactive one of A/B |
+| p4 extended | `/dev/mmcblk0p4` | none | 4224 | (container) | MBR extended partition holding p5 and p6. Not used directly |
+| p5 data | `/dev/mmcblk0p5`, mounted at `/data` | ext4 | 4232 | 2048 MiB | Persistent data. Holds the Mender state (`/data/mender`, reachable as `/var/lib/mender`) and the U-Boot tool configuration. Kept across updates |
+| p6 secrets | `/dev/mmcblk0p6` | **none** (raw) | 6288 | 1 MiB (2048 sectors) | Reserved for the application's encrypted secrets storage. Not formatted, not mounted, not touched by Mender (section 1.2) |
 
-The total image size is 1 GiB (`MENDER_STORAGE_TOTAL_SIZE_MB = "1024"`, the meta-mender default). On a
-16 GB card the data partition was 12.8 GiB after first boot. See
-[`03-production-notes.md`](03-production-notes.md) for sizing the partitions for the target storage.
+Notes:
+
+- **Alignment.** meta-mender aligns every partition to 8 MiB (`MENDER_PARTITION_ALIGNMENT`, the default
+  for this board). The secrets partition is 1 MiB, but starts on an 8 MiB boundary, so it occupies an
+  8 MiB slot on the card. Each logical partition also needs a small extended boot record in front of it,
+  which is why p5 starts 8 MiB after the start of p4.
+- **Total size.** The image is 6296 MiB (6,601,834,496 bytes, about 6.6 GB) and fits into the 7 GB of
+  storage specified for the target (SoW). The configuration sets `MENDER_STORAGE_TOTAL_SIZE_MB = "6288"`;
+  meta-mender's size calculation does not include the extended boot records, so the image is 8 MiB larger
+  than this value. The size of the rootfs partitions is calculated by meta-mender from the other values:
+  (6288 − 104 boot − 2048 data − 8 secrets − 16 overhead − 16 reserved) / 2 = 2048 MiB.
+- **The data partition no longer grows.** Previously (version 0.1) the data partition was enlarged to the
+  end of the card on first boot (`mender-growfs-data`). This is not possible when another partition
+  follows it, so the feature is disabled and the data partition has a fixed size of 2048 MiB. Space on the
+  card after the end of the image (for example on a 16 GB card) stays unused.
+- **The partition table cannot be changed by an update.** A Mender update replaces the content of one
+  rootfs partition only. Devices written with version 0.1 must be **re-written with the 0.2 `.sdimg`**
+  to get the new layout (see [`03-production-notes.md`](03-production-notes.md)).
+
+### 1.2 The secrets partition (p6)
+
+The secrets partition is delivered **raw and empty**: it has no filesystem, there is no `/etc/fstab` entry
+for it, and no mount directory. Mender does not use it: rootfs updates, rollbacks and power cycles do not
+change its content (validated, see [`02-validation-report.md`](02-validation-report.md), section 8).
+
+| Property | Value |
+|---|---|
+| Device | `/dev/mmcblk0p6` (logical partition in the extended partition p4) |
+| Size | 1 MiB = 1,048,576 bytes = 2048 sectors of 512 bytes, starting at sector 12,877,824 |
+| MBR partition type | `83` (Linux) |
+| Name / label | None. An MBR partition table has no partition names, and a label belongs to a filesystem, which this partition does not have. Address the partition as `/dev/mmcblk0p6`, or by the UUID of the container your software creates on it (for example a LUKS UUID, `/dev/disk/by-uuid/...`) |
+| Content after writing the `.sdimg` | Undefined: `bmaptool` only writes the blocks that contain data, and this partition is empty in the image. On a new card it reads as zeros; on a re-used card it may contain old data. Your provisioning step must initialise it (for example by formatting the encrypted container) |
+
+Configuration (in `kas/chemify-rpi4-mender.yml`):
+
+```text
+MENDER_EXTRA_PARTS = "secrets"
+MENDER_EXTRA_PARTS_SIZES_MB[secrets] = "1"
+MENDER_EXTRA_PARTS[secrets] = "--fstype=none"
+MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[secrets] = "/mnt/secrets"
+IMAGE_CLASSES += "mender-raw-extra-parts"
+MENDER_RAW_EXTRA_PARTS = "secrets"
+```
+
+- `MENDER_EXTRA_PARTS` is the meta-mender mechanism for additional partitions after the data partition
+  ([Mender: partition configuration](https://docs.mender.io/operating-system-updates-yocto-project/board-integration/partition-configuration)).
+  The partition numbers of the data partition and of the extra partition are calculated automatically.
+- `--fstype=none` is required for a raw partition: without it, the image creation tool (wic) uses its
+  default and formats the partition with a FAT filesystem.
+- meta-mender always adds an `/etc/fstab` entry (mounted at boot) and a mount directory for each extra
+  partition. Mounting a raw or encrypted partition at boot would fail. The small class
+  `meta-chemify-rpi4/classes/mender-raw-extra-parts.bbclass` removes the entry and the directory again for
+  the partitions listed in `MENDER_RAW_EXTRA_PARTS`; the build fails if the entry is not found. The mount
+  location is set explicitly, because meta-mender writes an fstab line without a mount point otherwise.
+
+> **Size and encryption headers.** 1 MiB is enough for small secrets, but not for an encryption container
+> with default settings: the default LUKS2 header is 16 MiB, and LUKS1 needs 2 MiB before the data area.
+> With cryptsetup 2.7, a LUKS2 container fits into 1 MiB only with a reduced header, for example
+> `--luks2-metadata-size 16k --luks2-keyslots-size 256k --offset 640`, which leaves about 704 KiB for data
+> and room for one key slot (tested on a 1 MiB file on the build host, not on the device; `cryptsetup` is
+> not part of `core-image-minimal`). If your scheme needs more space, the size can be raised up to 8 MiB
+> without using more space on the card (alignment, see above; not validated): change
+> `MENDER_EXTRA_PARTS_SIZES_MB[secrets]`.
 
 ---
 
@@ -272,7 +340,7 @@ timestamp are symbolic links to the latest build.
 | `core-image-minimal-raspberrypi4-64.manifest` | List of packages and versions in the image |
 | `core-image-minimal-raspberrypi4-64.wic.bz2` / `.wic.bmap` | Standard meta-raspberrypi image with **two** partitions and **no** Mender layout. Do not use it with this integration |
 
-The software version of the build is set by `MENDER_ARTIFACT_NAME` (default `chemify-rpi4-0.1.0`,
+The software version of the build is set by `MENDER_ARTIFACT_NAME` (default `chemify-rpi4-0.2.0`,
 see section 7). It is stored in the `.mender` Artifact and reported by `mender-update show-artifact` on the
 device.
 
@@ -280,7 +348,7 @@ device.
 
 ## 5. Writing the SD card
 
-Use an SD card of at least 2 GB (the image is 1 GiB). Writing the card erases all data on it.
+Use an SD card of at least 8 GB (the image is 6.6 GB, see section 1.1). Writing the card erases all data on it.
 
 > **Warning: choose the target device carefully.** Writing to the wrong device destroys its contents,
 > for example your computer's system disk. Identify the SD card by its size and model before writing, and
@@ -316,14 +384,15 @@ Use an SD card of at least 2 GB (the image is 1 GiB). Writing the card erases al
 
 ```text
 bmaptool: info: block map format version 2.0
-bmaptool: info: 258048 blocks of size 4096 (1008.0 MiB), mapped ... blocks (...)
+bmaptool: info: 1611776 blocks of size 4096 (6.1 GiB), mapped ... blocks (...)
 bmaptool: info: copying image 'core-image-minimal-raspberrypi4-64-<timestamp>.sdimg' to block device '/dev/sdX' using bmap file 'core-image-minimal-raspberrypi4-64.sdimg.bmap'
 bmaptool: info: synchronizing '/dev/sdX'
-bmaptool: info: copying time: 43.8s, copying speed 6.4 MiB/sec
+bmaptool: info: copying time: 59.3s, copying speed 7.8 MiB/sec
 ```
 
 Always use the `.sdimg.bmap` produced by the build. It also covers the (empty) U-Boot environment area, so
-that a re-used card starts with a clean environment (see section 11).
+that a re-used card starts with a clean environment (see section 11). It does not cover the empty secrets
+partition, which keeps any old content on a re-used card (section 1.2).
 
 ### 5.2 Alternatives (not used during validation)
 
@@ -384,8 +453,7 @@ raspberrypi4-64 login:
 On a new card, `bad CRC, using default environment` is expected: no U-Boot environment has been stored
 yet. U-Boot uses its built-in default and saves it during the boot process.
 
-On the first boot, the data partition is enlarged to fill the card (`EXT4-fs (mmcblk0p4): resized ...`).
-The first login can take a few seconds longer while this is in progress.
+The data partition has a fixed size and is not enlarged on first boot (section 1.1).
 
 ### 6.3 Logging in
 
@@ -403,7 +471,7 @@ fw_printenv mender_boot_part upgrade_available
 
 ```text
 /dev/mmcblk0p2 on / type ext4 (rw,relatime)
-chemify-rpi4-0.1.0
+chemify-rpi4-0.2.0
 mender_boot_part=2
 upgrade_available=0
 ```
@@ -441,14 +509,18 @@ kas dump kas/chemify-rpi4-mender.yml
 | `IMAGE_FSTYPES:remove` | base | `rpi-sdimg` | Removes the non-Mender Raspberry Pi SD card image type | Keep |
 | meta-mender revision | this repo | `scarthgap-v2026.10.02` | Provides Mender Client 6.1 LTS (SoW R.1.1). The base configuration pins an older release with Mender Client 5.0, which is end of life | Follow Mender's LTS releases |
 | Repository URLs | this repo | `https://...` | Same repositories and commits as the base configuration, over HTTPS (section 3.4.3) | Keep |
-| `MENDER_ARTIFACT_NAME` | this repo (kas `env`) | `chemify-rpi4-0.1.0` | Name of the software version. **Must be different for every update.** Overridable from the shell (section 9) | Set by your release process |
+| `MENDER_ARTIFACT_NAME` | this repo (kas `env`) | `chemify-rpi4-0.2.0` | Name of the software version. **Must be different for every update.** Overridable from the shell (section 9) | Set by your release process |
 | `MENDER_FEATURES_ENABLE:append = " mender-prepopulate-inactive-partition"` | this repo | | Writes the root filesystem into both rootfs A and rootfs B of the `.sdimg`. Without it, rootfs B is empty until the first update, and the bootloader checks of the integration checklist cannot switch to it | Optional |
+| `MENDER_STORAGE_TOTAL_SIZE_MB` | this repo | `"6288"` | Storage size the layout is calculated for; gives rootfs A/B of 2048 MiB each and an image of 6.6 GB, within the 7 GB of the target (section 1.1) | Adjust to your product image and storage |
+| `MENDER_DATA_PART_SIZE_MB` | this repo | `"2048"` | Fixed size of the data partition (p5) | Adjust to your application's data |
+| `MENDER_EXTRA_PARTS` and related variables, `IMAGE_CLASSES += "mender-raw-extra-parts"` | this repo, `meta-chemify-rpi4` | `secrets`, 1 MiB, `--fstype=none` | Raw secrets partition p6, without fstab entry (section 1.2) | Keep |
+| `MENDER_FEATURES_DISABLE:append = " mender-growfs-data"` | this repo | | The data partition cannot grow, because the secrets partition follows it. meta-mender already disables the feature when `MENDER_EXTRA_PARTS` is set; the line makes this explicit | Keep |
 | `EXTRA_IMAGE_FEATURES += "allow-empty-password empty-root-password allow-root-login"` | this repo | | **Development only.** Allows `root` to log in without a password | **Remove** |
 | Verification key (`artifact-verify-key.pem`) | `meta-chemify-rpi4` | RSA 3072 public key (Northern.tech development key) | The client only installs Artifacts signed with the matching private key. `ArtifactVerifyKey` is set in `/etc/mender/mender.conf` automatically | **Replace** with your own key before your first build (section 9.2) |
 | `pseudo` 1.9.11 | `meta-chemify-rpi4` | | Build host compatibility (section 3.4.2) | Remove after moving to yocto-5.0.21 or later |
 
-Settings inherited from meta-mender defaults that you may want to change for production
-(`MENDER_STORAGE_TOTAL_SIZE_MB`, `MENDER_DATA_PART_SIZE_MB`, server configuration) are discussed in
+Settings that you may want to change for production (partition sizes, server configuration) are
+discussed in
 [`03-production-notes.md`](03-production-notes.md).
 
 ---
@@ -553,7 +625,7 @@ Build with a new software version name:
 ```bash
 cd chemify-rpi4-mender
 export KAS_WORK_DIR=$HOME/rpi4-mender-work
-MENDER_ARTIFACT_NAME=chemify-rpi4-0.1.1 kas build kas/chemify-rpi4-mender.yml
+MENDER_ARTIFACT_NAME=chemify-rpi4-0.2.1 kas build kas/chemify-rpi4-mender.yml
 ```
 
 The new Artifact is `$KAS_WORK_DIR/build/tmp/deploy/images/raspberrypi4-64/core-image-minimal-raspberrypi4-64.mender`.
@@ -599,11 +671,11 @@ $MENDER_ARTIFACT --version
 Sign the Artifact and check the signature with the public key:
 
 ```bash
-$MENDER_ARTIFACT sign chemify-rpi4-0.1.1.mender -k private.key -o chemify-rpi4-0.1.1-signed.mender
-$MENDER_ARTIFACT validate chemify-rpi4-0.1.1-signed.mender -k public.key
+$MENDER_ARTIFACT sign chemify-rpi4-0.2.1.mender -k private.key -o chemify-rpi4-0.2.1-signed.mender
+$MENDER_ARTIFACT validate chemify-rpi4-0.2.1-signed.mender -k public.key
 ```
 
-**What you should see:** `Artifact file 'chemify-rpi4-0.1.1-signed.mender' validated successfully`.
+**What you should see:** `Artifact file 'chemify-rpi4-0.2.1-signed.mender' validated successfully`.
 
 The development key used during validation was generated with the same OpenSSL commands as in step 1.
 
@@ -623,7 +695,7 @@ The development key used during validation was generated with the same OpenSSL c
 3. Install:
 
    ```bash
-   mender-update install /data/chemify-rpi4-0.1.1-signed.mender
+   mender-update install /data/chemify-rpi4-0.2.1-signed.mender
    ```
 
    **What you should see:**
@@ -664,7 +736,7 @@ The development key used during validation was generated with the same OpenSSL c
      mender-update show-artifact
      ```
 
-     You should see `Committed.` and then `chemify-rpi4-0.1.1`. `upgrade_available` is now `0`, and the
+     You should see `Committed.` and then `chemify-rpi4-0.2.1`. `upgrade_available` is now `0`, and the
      device stays on the new version across reboots.
 
    - **Roll back** (return to the previous version):
